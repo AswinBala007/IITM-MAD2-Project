@@ -1,13 +1,7 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from extensions import db, bcrypt
+# from flask_migrate import Migrate
 
-# from app import app
-from flask_bcrypt import Bcrypt
-from flask_migrate import Migrate
-from flask_sqlalchemy import SQLAlchemy
-from datetime import datetime
-
-db = SQLAlchemy()
-bcrypt = Bcrypt()
 # migrate = Migrate(app, db)
 
 ### 1️⃣ User Model (Admin & User) ###
@@ -15,25 +9,28 @@ bcrypt = Bcrypt()
 
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(120), unique=True,
+    email = db.Column(db.String(120), unique=True,
                          nullable=False)  # Email ID
-    password_hash = db.Column(db.String(256), nullable=False)
+    password = db.Column(db.String(256), nullable=False)
     full_name = db.Column(db.String(100), nullable=False)
     qualification = db.Column(db.String(100))
     dob = db.Column(db.Date)
     role = db.Column(db.String(10), default="user")  # 'admin' or 'user'
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    last_login = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Relationships
     quiz_attempts = db.relationship('QuizAttempt', backref='user', lazy=True)
+    scores = db.relationship('Score', back_populates='user', lazy=True)
 
     def set_password(self, password):
-        self.password_hash = bcrypt.generate_password_hash(
-            password).decode('utf-8')
-
+        self.password = bcrypt.generate_password_hash(password).decode('utf-8')
+        
     def check_password(self, password):
-        return bcrypt.check_password_hash(self.password_hash, password)
+        return bcrypt.check_password_hash(self.password, password)
 
     def __repr__(self):
-        return f"User('{self.username}', '{self.role}')"
+        return f"User('{self.email}', '{self.role}')"
 
 
 ### 2️⃣ Subject Model ###
@@ -67,7 +64,7 @@ class Quiz(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     chapter_id = db.Column(db.Integer, db.ForeignKey(
         'chapter.id'), nullable=False)
-    date_of_quiz = db.Column(db.Date, nullable=False, default=datetime.utcnow)
+    date_of_quiz = db.Column(db.Date, nullable=False, default=lambda: datetime.now(timezone.utc).date())
     time_duration = db.Column(
         db.Integer, nullable=False)  # Duration in minutes
     remarks = db.Column(db.Text, nullable=True)
@@ -100,10 +97,10 @@ class QuizAttempt(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     quiz_id = db.Column(db.Integer, db.ForeignKey('quiz.id'), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    start_time = db.Column(db.DateTime, default=datetime.utcnow)
+    start_time = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     end_time = db.Column(db.DateTime, nullable=True)
 
-    score = db.relationship('Score', backref='quiz_attempt', uselist=False)
+    score = db.relationship('Score', uselist=False, back_populates='quiz_attempt')
 
     def __repr__(self):
         return f"QuizAttempt(User ID: {self.user_id}, Quiz ID: {self.quiz_id})"
@@ -114,8 +111,12 @@ class Score(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     quiz_attempt_id = db.Column(db.Integer, db.ForeignKey(
         'quiz_attempt.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     total_score = db.Column(db.Integer, nullable=False)
-    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = db.relationship('User', back_populates='scores', lazy=True)
+    quiz_attempt = db.relationship('QuizAttempt', back_populates='score', lazy=True)
 
     def __repr__(self):
         return f"Score('{self.total_score}', Attempt ID: {self.quiz_attempt_id}')"
@@ -124,11 +125,14 @@ class Score(db.Model):
 ### Database Initialization ###
 def create_admin():
     """Create the default admin user if not exists."""
-    admin_user = User.query.filter_by(role="admin").first()
-    if not admin_user:
-        admin = User(username="admin@example.com",
-                     full_name="Quiz Master", role="admin")
-        admin.set_password("admin123")  # Change this in production
-        db.session.add(admin)
-        db.session.commit()
-        print("✅ Admin user created: admin@example.com / admin123")
+    try:
+        admin_user = User.query.filter_by(role="admin").first()
+        if not admin_user:
+            admin = User(email="admin@quiz.com",
+                        full_name="Quiz Master", role="admin")
+            admin.set_password("admin123")  # Change this in production
+            db.session.add(admin)
+            db.session.commit()
+            print("✅ Admin user created: admin@quiz.com / admin123")
+    except Exception as e:
+        print(f"Error creating admin: {str(e)}")
